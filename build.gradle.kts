@@ -7,4 +7,12 @@ plugins {
     alias(libs.plugins.hilt.android.plugin) apply false
     alias(libs.plugins.ksp) apply false
     alias(libs.plugins.kotlin.jvm) apply false
+    alias(libs.plugins.kotlin.serialization) apply false
+}
+
+registerKeystoreGeneratorTask("generateReleaseKeystore") {
+    // 1. 指定 Keystore 配置文件的位置
+    // 假设你把配置文件放在了项目根目录下的 'config/keystore_info.json'
+    configFile.set(layout.projectDirectory.file("config/keystore_info.json"))
+
 }
