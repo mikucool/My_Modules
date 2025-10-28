@@ -213,17 +213,18 @@ private fun findCombinationsRecursive(
 
 fun createTables(connection: Connection) {
     connection.createStatement().use { statement ->
-        statement.execute("DROP TABLE IF EXISTS spin_results")
+        statement.execute("DROP TABLE IF EXISTS slot_results")
         statement.execute(
             """
-            CREATE TABLE spin_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+            CREATE TABLE slot_results (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
                 payout INTEGER NOT NULL,
-                grid TEXT NOT NULL
+                grid TEXT NOT NULL,
+                timestamp INTEGER NOT NULL
             );
             """
         )
-        statement.execute("CREATE INDEX idx_payout ON spin_results (payout);")
+        statement.execute("CREATE INDEX idx_payout ON slot_results (payout);")
     }
 }
 
@@ -240,9 +241,10 @@ fun insertGrid(connection: Connection, grid: List<List<SlotSymbol>>, payout: Int
             }
         }
     }
-    connection.prepareStatement("INSERT INTO spin_results (payout, grid) VALUES (?, ?)").use { statement ->
+    connection.prepareStatement("INSERT INTO slot_results (payout, grid, timestamp) VALUES (?, ?, ?)").use { statement ->
         statement.setInt(1, payout)
         statement.setString(2, gridString)
+        statement.setLong(3, System.currentTimeMillis())
         statement.executeUpdate()
     }
 }

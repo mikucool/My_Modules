@@ -1,7 +1,5 @@
 package com.books_goo_hzz.lib_slot_core
 
-import java.awt.Point
-
 /**
  * 定义了所有20条连线的静态数据。
  * 每一条连线都是一个由5个Point组成的列表，Point的x代表列(0-4)，y代表行(0-2)。

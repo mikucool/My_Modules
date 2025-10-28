@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -14,8 +15,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.books_goo_hzz.lib_slot_core.SlotSymbol
 
 @Composable
 fun SlotScreen(viewModel: SlotViewModel = hiltViewModel()) {
@@ -27,17 +30,33 @@ fun SlotScreen(viewModel: SlotViewModel = hiltViewModel()) {
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(16.dp)
         ) {
             when (val state = uiState) {
                 is SlotUiState.Idle -> {
-                    Text(text = "Welcome to the Slot Machine!")
+                    Text(text = "Welcome to the Slot Machine!\nPress Spin to start.")
                 }
                 is SlotUiState.Loading -> {
                     CircularProgressIndicator()
                 }
                 is SlotUiState.Success -> {
-                    // todo
+                    Text("Debug Info", style = MaterialTheme.typography.titleLarge)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Requested Payout: ${state.requestedPayout}")
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Display the Grid
+                    Text("Result Grid:", style = MaterialTheme.typography.titleMedium)
+                    GridDisplay(grid = state.result.grid)
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Display Winning Info
+                    Text("Total Win: ${state.result.totalWinAmount}")
+                    Text("Winning Lines: ${state.result.winningLines.size}")
+
                 }
                 is SlotUiState.Error -> {
                     Text(text = "Error: ${state.message}", color = MaterialTheme.colorScheme.error)
@@ -49,6 +68,25 @@ fun SlotScreen(viewModel: SlotViewModel = hiltViewModel()) {
             Button(onClick = { viewModel.spin() }, enabled = uiState !is SlotUiState.Loading) {
                 Text(text = "Spin")
             }
+        }
+    }
+}
+
+@Composable
+fun GridDisplay(grid: List<List<SlotSymbol>>) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        grid.forEach { row ->
+            Text(
+                text = row.joinToString(" ") { symbol ->
+                    when(symbol) {
+                        is SlotSymbol.GoldCoin -> symbol.name.replace("symbol", "s")
+                        is SlotSymbol.Wild -> "WILD"
+                        else -> "-"
+                    }
+                },
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center
+            )
         }
     }
 }
