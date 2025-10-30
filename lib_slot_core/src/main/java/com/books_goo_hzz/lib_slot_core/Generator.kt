@@ -8,6 +8,7 @@ const val TARGET_DB_NAME = "slot_results.db"
 const val TOTAL_BET = 2000L // 总押注额，与calculateWinnings的输入保持一致
 const val MAX_ATTEMPTS_PER_COMBINATION = 100 // 为单个赢奖组合尝试生成有效盘面的最大次数
 const val MAX_SOLUTIONS_TO_FIND_PER_PAYOUT = 100 // 熔断机制：为每个赔率最多寻找多少种理论组合
+private const val WILD_SUBSTITUTION_PROBABILITY = .15 // 在中奖线中，用WILD替代原符号的概率
 
 // --- 分层生成策略定义 ---
 data class GenerationStrategy(val maxCombinationSize: Int, val maxGridsPerPayout: Int)
@@ -52,7 +53,7 @@ fun main() {
 
     // --- 核心生成逻辑 ---
     // 我们将为 5 到 10000 范围内的所有赔率（步长为5）生成结果盘
-    for (targetPayout in 5..1000 step 5) {
+    for (targetPayout in 5..10000 step 5) {
         val strategy = selectStrategy(targetPayout)
         println("\n--- Processing target payout: $targetPayout (Strategy: maxCombo=${strategy.maxCombinationSize}, maxGrids=${strategy.maxGridsPerPayout}) ---")
 
@@ -141,21 +142,47 @@ private fun placeWinsRecursive(
     val win = winsToPlace.first()
     val remainingWins = winsToPlace.drop(1)
 
+    // --- NEW LOGIC: Strategically introduce WILD symbols ---
+    val symbolsForLine = mutableListOf<SlotSymbol>()
+    for (i in 0 until win.count) {
+        // With a certain probability, substitute the GoldCoin with a WILD
+        if (Random.nextFloat() < WILD_SUBSTITUTION_PROBABILITY) {
+            symbolsForLine.add(SlotSymbol.Wild)
+        } else {
+            symbolsForLine.add(win.symbol)
+        }
+    }
+
+    // A winning line cannot consist only of WILDs. If so, convert one back to the original symbol.
+    if (symbolsForLine.all { it is SlotSymbol.Wild }) {
+        symbolsForLine[Random.nextInt(symbolsForLine.size)] = win.symbol
+    }
+    // --- END NEW LOGIC ---
+
     for (lineId in availablePaylines.shuffled(Random)) {
         val payline = Payline.allPaylines[lineId]
         val positionsToPlace = payline.take(win.count)
 
-        val canPlace = positionsToPlace.all { point -> grid[point.y][point.x] == SlotSymbol.Empty || grid[point.y][point.x] == win.symbol }
+        // Check if the target positions are empty or match the symbols we intend to place.
+        val canPlace = positionsToPlace.zip(symbolsForLine).all { (point, symbolToPlace) ->
+            val existingSymbol = grid[point.y][point.x]
+            existingSymbol == SlotSymbol.Empty || existingSymbol == symbolToPlace
+        }
 
         if (canPlace) {
             val originalSymbols = positionsToPlace.map { point -> grid[point.y][point.x] }
-            positionsToPlace.forEach { point -> grid[point.y][point.x] = win.symbol }
+
+            // Place the generated sequence (which might include WILDs)
+            positionsToPlace.zip(symbolsForLine).forEach { (point, symbolToPlace) ->
+                grid[point.y][point.x] = symbolToPlace
+            }
 
             val nextAvailablePaylines = availablePaylines.toMutableSet().apply { remove(lineId) }
             if (placeWinsRecursive(remainingWins, grid, nextAvailablePaylines)) {
                 return true
             }
 
+            // Backtrack if the recursive call failed
             positionsToPlace.forEachIndexed { index, point ->
                 grid[point.y][point.x] = originalSymbols[index]
             }
