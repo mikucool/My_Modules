@@ -28,7 +28,7 @@ class SlotViewModel @Inject constructor(
     fun spin() {
         viewModelScope.launch {
             _uiState.value = SlotUiState.Loading
-            val testPayouts = (5..1000 step 5).toList()
+            val testPayouts = (5..4000 step 5).toList()
             val randomPayout = testPayouts.random()
 
             slotRepository.getResultByPayout(randomPayout)

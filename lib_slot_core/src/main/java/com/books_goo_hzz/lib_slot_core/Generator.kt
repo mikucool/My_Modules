@@ -3,12 +3,15 @@ package com.books_goo_hzz.lib_slot_core
 import java.sql.Connection
 import java.sql.DriverManager
 import kotlin.random.Random
+import kotlinx.coroutines.*
 
 const val TARGET_DB_NAME = "slot_results.db"
 const val TOTAL_BET = 2000L // 总押注额，与calculateWinnings的输入保持一致
 const val MAX_ATTEMPTS_PER_COMBINATION = 100 // 为单个赢奖组合尝试生成有效盘面的最大次数
 const val MAX_SOLUTIONS_TO_FIND_PER_PAYOUT = 100 // 熔断机制：为每个赔率最多寻找多少种理论组合
 // ⭐ WILD使用策略已改为冲突驱动，不再使用固定概率
+// ⭐ 超时机制：对于4000+的倍率，每个倍率最多处理60秒，超时则放弃
+const val TIMEOUT_MS_PER_PAYOUT_HIGH = 10_000L // 高倍率（4000+）的超时时间：60秒
 
 // --- 分层生成策略定义 ---
 data class GenerationStrategy(val maxCombinationSize: Int, val maxGridsPerPayout: Int)
@@ -27,6 +30,75 @@ private fun selectStrategy(payout: Int): GenerationStrategy {
 }
 
 /**
+ * ⭐ 判断高倍率（4000+）是否应该生成
+ * 黑名单模式：只排除明显不合理的倍数，其余都允许尝试生成（提高产出率）
+ * 
+ * @param payout 目标倍率
+ * @return true 应该生成；false 明显不合理，跳过
+ */
+private fun isProminentPayout(payout: Int): Boolean {
+    // 只对4000+的倍率应用此策略
+    if (payout < 4000) return true
+    
+    // 常见的高赔率5连：500, 490, 260, 150, 80, 75, 70, 65, 60, 55
+    val highPayout5Links = listOf(500, 490, 260, 150, 80, 75, 70, 65, 60, 55)
+    
+    // ⭐ 黑名单规则1：能被某个5连赔率整除，但需要的线路数 > 20（超出大满贯极限，物理上不可能）
+    for (payout5Link in highPayout5Links) {
+        if (payout % payout5Link == 0) {
+            val lines = payout / payout5Link
+            if (lines > 20) {
+                return false  // 线路数超过20，物理上不可能（大满贯最多20条）
+            }
+        }
+    }
+    
+    // ⭐ 黑名单规则2：对于超高倍率（>10000），如果不能被常见5连赔率整除，跳过
+    // 因为这些倍率可能需要太多不同的符号组合，生成成功率极低
+    if (payout > 10000) {
+        var canBeDividedBy5Link = false
+        for (payout5Link in highPayout5Links) {
+            if (payout % payout5Link == 0) {
+                val lines = payout / payout5Link
+                if (lines <= 20) {
+                    canBeDividedBy5Link = true
+                    break
+                }
+            }
+        }
+        // 尝试检查是否能被混合组合整除（最多2种符号）
+        if (!canBeDividedBy5Link) {
+            var canBeMixed = false
+            for (p1 in highPayout5Links) {
+                for (p2 in highPayout5Links) {
+                    if (p1 == p2) continue
+                    for (n1 in 1..5) {
+                        val remainder = payout - p1 * n1
+                        if (remainder < 0) break
+                        if (remainder % p2 == 0) {
+                            val n2 = remainder / p2
+                            val totalLines = n1 + n2
+                            if (n2 in 1..5 && totalLines <= 20) {
+                                canBeMixed = true
+                                break
+                            }
+                        }
+                    }
+                    if (canBeMixed) break
+                }
+                if (canBeMixed) break
+            }
+            if (!canBeMixed) {
+                return false  // 超过10000且不能被常见5连或混合组合整除，跳过
+            }
+        }
+    }
+    
+    // ⭐ 默认：允许尝试生成（黑名单模式，只排除明显不合理的）
+    return true
+}
+
+/**
  * 数据类，用于封装一个具体的赢奖组合。
  * 例如: symbol01的3连，赔率为10。
  */
@@ -41,7 +113,7 @@ private val allPossibleWins: List<WinningCombination> by lazy {
     }.sortedByDescending { it.payout }
 }
 
-fun main() {
+fun generatePrecomputedResults() = runBlocking {
     println("Starting result grid generation...")
     val startTime = System.currentTimeMillis()
 
@@ -54,32 +126,28 @@ fun main() {
     // --- 核心生成逻辑 ---
     // 我们将为 5 到 10000 范围内的所有赔率（步长为5）生成结果盘
     for (targetPayout in 5..10000 step 5) {
+        // ⭐ 对于4000+的倍率，先检查是否满足过滤条件
+        if (targetPayout >= 4000 && !isProminentPayout(targetPayout)) {
+            println("--- Skipping payout $targetPayout (not a prominent payout) ---")
+            continue
+        }
+        
         val strategy = selectStrategy(targetPayout)
         println("\n--- Processing target payout: $targetPayout (Strategy: maxCombo=${strategy.maxCombinationSize}, maxGrids=${strategy.maxGridsPerPayout}) ---")
 
-        val combinations = findWinningCombinations(targetPayout, strategy.maxCombinationSize)
-        println("Found ${combinations.size} theoretical combinations.")
-
-        var gridsForThisPayout = 0
-        // 遍历每一种赢奖组合方案
-        for (combo in combinations) {
-            if (gridsForThisPayout >= strategy.maxGridsPerPayout) {
-                println("  Reached max grids limit for payout $targetPayout. Moving to next payout.")
-                break
+        // ⭐ 对于4000+的倍率，使用协程超时机制
+        val gridsForThisPayout = if (targetPayout >= 4000) {
+            withTimeoutOrNull(TIMEOUT_MS_PER_PAYOUT_HIGH) {
+                generateGridsForPayout(targetPayout, strategy, slotMachine, connection)
+            } ?: run {
+                println("Timeout: Spending ${TIMEOUT_MS_PER_PAYOUT_HIGH / 1000}s on payout $targetPayout, giving up and moving to next payout.")
+                0
             }
-
-            val remainingLimit = strategy.maxGridsPerPayout - gridsForThisPayout
-            val validGrids = generateValidGridsForCombination(combo, targetPayout, slotMachine, remainingLimit)
-
-            if (validGrids.isNotEmpty()) {
-                println("  Successfully generated ${validGrids.size} valid grid(s) for combination: ${combo.map { it.payout }}")
-                validGrids.forEach { grid ->
-                    insertGrid(connection, grid, targetPayout)
-                    gridsForThisPayout++
-                    totalGridsGenerated++
-                }
-            }
+        } else {
+            generateGridsForPayout(targetPayout, strategy, slotMachine, connection)
         }
+
+        totalGridsGenerated += gridsForThisPayout
         println("Generated a total of $gridsForThisPayout grid(s) for payout $targetPayout.")
     }
 
@@ -90,11 +158,48 @@ fun main() {
 }
 
 /**
+ * ⭐ 为指定倍率生成网格（挂起函数，支持协程超时）
+ */
+private suspend fun generateGridsForPayout(
+    targetPayout: Int,
+    strategy: GenerationStrategy,
+    slotMachine: SlotMachine,
+    connection: Connection
+): Int {
+    val combinations = findWinningCombinations(targetPayout, strategy.maxCombinationSize)
+    println("Found ${combinations.size} theoretical combinations.")
+
+    var gridsForThisPayout = 0
+    // 遍历每一种赢奖组合方案
+    for (combo in combinations) {
+        // ⭐ 定期让出控制权，使协程超时能够生效
+        yield()
+
+        if (gridsForThisPayout >= strategy.maxGridsPerPayout) {
+            println("  Reached max grids limit for payout $targetPayout. Moving to next payout.")
+            break
+        }
+
+        val remainingLimit = strategy.maxGridsPerPayout - gridsForThisPayout
+        val validGrids = generateValidGridsForCombination(combo, targetPayout, slotMachine, remainingLimit)
+
+        if (validGrids.isNotEmpty()) {
+            println("  Successfully generated ${validGrids.size} valid grid(s) for combination: ${combo.map { it.payout }}")
+            validGrids.forEach { grid ->
+                insertGrid(connection, grid, targetPayout)
+                gridsForThisPayout++
+            }
+        }
+    }
+    return gridsForThisPayout
+}
+
+/**
  * 为一个给定的赢奖组合(combination)，尝试生成多个有效的结果盘。
  * @param limit 最多生成多少个有效盘面。
  * @return 一个包含多个有效结果盘的列表。
  */
-fun generateValidGridsForCombination(
+suspend fun generateValidGridsForCombination(
     combination: List<WinningCombination>,
     targetPayout: Int,
     slotMachine: SlotMachine,
@@ -104,6 +209,12 @@ fun generateValidGridsForCombination(
 
     // 尝试多次，以寻找不同的随机填充结果
     for (attempt in 1..MAX_ATTEMPTS_PER_COMBINATION) {
+        // ⭐ 定期让出控制权，使协程超时能够生效
+        // 每10次尝试让出一次，避免过于频繁
+        if (attempt % 10 == 0) {
+            yield()
+        }
+
         val grid: MutableList<MutableList<SlotSymbol>> = MutableList(3) { MutableList(5) { SlotSymbol.Empty } }
         val placementSuccessful = placeWinsRecursive(combination, grid, Payline.allPaylines.indices.toMutableSet())
 

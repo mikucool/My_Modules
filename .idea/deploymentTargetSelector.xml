@@ -8,6 +8,9 @@
       <SelectionState runConfigName="feature_slot">
         <option name="selectionMode" value="DROPDOWN" />
       </SelectionState>
+      <SelectionState runConfigName="SlotDatabaseAccuracyTest">
+        <option name="selectionMode" value="DROPDOWN" />
+      </SelectionState>
     </selectionStates>
   </component>
 </project>
