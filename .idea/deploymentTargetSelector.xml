@@ -8,7 +8,22 @@
       <SelectionState runConfigName="feature_slot">
         <option name="selectionMode" value="DROPDOWN" />
       </SelectionState>
-      <SelectionState runConfigName="SlotDatabaseAccuracyTest">
+      <SelectionState runConfigName="feat_compose_playground">
+        <option name="selectionMode" value="DROPDOWN" />
+      </SelectionState>
+      <SelectionState runConfigName="GraphicsImageBrush">
+        <option name="selectionMode" value="DROPDOWN" />
+      </SelectionState>
+      <SelectionState runConfigName="GraphicsBrushSizeRadialGradientAfter">
+        <option name="selectionMode" value="DROPDOWN" />
+      </SelectionState>
+      <SelectionState runConfigName="GraphicsBrushSizeRadialGradientBefore">
+        <option name="selectionMode" value="DROPDOWN" />
+      </SelectionState>
+      <SelectionState runConfigName="GraphicsBrushSize">
+        <option name="selectionMode" value="DROPDOWN" />
+      </SelectionState>
+      <SelectionState runConfigName="GraphicsBrushTileMode">
         <option name="selectionMode" value="DROPDOWN" />
       </SelectionState>
     </selectionStates>
